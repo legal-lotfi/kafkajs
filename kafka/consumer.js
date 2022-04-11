@@ -1,13 +1,21 @@
 const { kafka } = require("./index");
 const admin = require("./admin.js");
 
+/**
+ * 
+ * @param {*} consumer 
+ * @returns {Array} subscriptionTopics
+ */
 async function consumerSubscriptions(consumer) {
+  let subscriptionTopics = [];
   // Subscribe to a topic
   await consumer.subscribe({
     topic: "text",
     fromBeginning: false,
   });
+  subscriptionTopics.push("text");
 
+  return subscriptionTopics;
 }
 
 // Create a consumer and attach it to the socket
@@ -16,25 +24,12 @@ async function createConsumer(socket, groupId) {
 
   const consumer = kafka.consumer({ groupId: groupId });
 
-  try {
-    await admin.admin.resetOffsets({ groupId, topic: "text" });
-  } catch (err) {
-    console.log(err);
-  }
-
   await consumer.connect();
 
   // The consumer subscribe to multiple topics
-  await consumerSubscriptions(consumer);
+  let subscriptionTopics = await consumerSubscriptions(consumer);
 
-  let fetchedOffsets = await admin.admin.fetchTopicOffsets("text");
-  let { partition, offset } = fetchedOffsets[0];
-  console.log(partition, offset);
-  let off = await admin.admin.fetchOffsets({ groupId, topic: "text" });
-  console.log(off);
-  // consumer.seek({ topic: 'text', partition, offset })
-
-  await consumer.run({
+  consumer.run({
     eachMessage: async ({ topic, partition, message }) => {
       const event = partition + message.value.toString();
 
@@ -43,7 +38,21 @@ async function createConsumer(socket, groupId) {
     },
   });
 
+  // Seek to last offset for all subscribed topics/partitions
+  resetTopicOffsets(consumer, groupId, subscriptionTopics, -1);
+  
   return consumer;
+}
+
+async function resetTopicOffsets(consumer, groupId, topics, offset){
+  topics.forEach(async (topic) => {
+    let patitionsOffset = await admin.admin.fetchOffsets({ groupId: groupId, topic });
+    for (const i in patitionsOffset) {
+        let { partition } = patitionsOffset[i];
+        console.log({ topic, partition, offset: offset })
+        consumer.seek({ topic, partition, offset: offset });
+      }
+  });
 }
 
 // Main function
